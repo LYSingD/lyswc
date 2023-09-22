@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 )
@@ -8,9 +9,25 @@ import (
 func main() {
 	fmt.Println("Hello, World!")
 
+	// flag.*() returns a Pointer
+	wordPtr := flag.String("word", "foo", "a string")
+	numbPtr := flag.Int("numb", 42, "an int")
+	forkPtr := flag.Bool("fork", false, "a bool")
+
+	var svar string
+	flag.StringVar(&svar, "svar", "bar", "a string var")
+
+	flag.Parse()
+
+	fmt.Println("word:", *wordPtr)
+	fmt.Println("numb:", *numbPtr)
+	fmt.Println("fork:", *forkPtr)
+	fmt.Println("svar:", svar)
+	fmt.Println("tail:", flag.Args())
+
 	// os.Args is a slice of strings that contains the command-line arguments.
 	// os.Args[0] is always the program's name/path itself.
-	args := os.Args[1:]
+	args := flag.Args()
 	fmt.Println(args)
 
 	if len(args) < 1 {
