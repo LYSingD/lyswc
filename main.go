@@ -3,36 +3,37 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"strings"
 )
 
 func main() {
-	fmt.Println("Hello, World!")
 
 	// flag.*() returns a Pointer
-	wordPtr := flag.String("word", "foo", "a string")
-	numbPtr := flag.Int("numb", 42, "an int")
-	forkPtr := flag.Bool("fork", false, "a bool")
+	mainFs := flag.NewFlagSet("mainFlagSet", flag.ContinueOnError)
+	mainFs.SetOutput(ioutil.Discard)
 
-	var svar string
-	flag.StringVar(&svar, "svar", "bar", "a string var")
+	counterPtr := mainFs.Bool("c", false, "The number of bytes in each input file is written to the standard output.")
 
-	flag.Parse()
+	// Parse the command-line arguments with the custom FlagSet
+	err := mainFs.Parse(os.Args[1:])
+	fmt.Println("tail:", mainFs.Args())
 
-	fmt.Println("word:", *wordPtr)
-	fmt.Println("numb:", *numbPtr)
-	fmt.Println("fork:", *forkPtr)
-	fmt.Println("svar:", svar)
-	fmt.Println("tail:", flag.Args())
+	if err != nil {
+		errString := err.Error()
+		err_splitter := strings.Split(errString, " ")
+		invalid_option_index := len(err_splitter) - 1
+		invalid_option := err_splitter[invalid_option_index][1:]
+		fmt.Printf("lyswc: illegal option -- %s", invalid_option)
+		return
+	}
 
-	// os.Args is a slice of strings that contains the command-line arguments.
-	// os.Args[0] is always the program's name/path itself.
-	args := flag.Args()
-	fmt.Println(args)
+	args := mainFs.Args()
 
 	if len(args) < 1 {
 		fmt.Println("Usage: lyswc <filepath>")
-		os.Exit(1)
+		return
 	}
 
 	fmt.Println("You entered:", args)
