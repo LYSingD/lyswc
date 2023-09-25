@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -14,11 +15,12 @@ func main() {
 	mainFs := flag.NewFlagSet("mainFlagSet", flag.ContinueOnError)
 	mainFs.SetOutput(ioutil.Discard)
 
-	counterPtr := mainFs.Bool("c", false, "The number of bytes in each input file is written to the standard output.")
-
+	bytesCounterPtr := mainFs.Bool("c", false, "The number of bytes in each input file is written to the standard output.")
+	linesCounterPtr := mainFs.Bool("l", false, "The number of lines in each input file is written to the standard output.")
+	wordsCounterPtr := mainFs.Bool("w", false, "The number of words in each input file is written to the standard output.")
 	// Parse the command-line arguments with the custom FlagSet
 	err := mainFs.Parse(os.Args[1:])
-	fmt.Println("tail:", mainFs.Args())
+	// fmt.Println("tail:", mainFs.Args())
 
 	if err != nil {
 		errString := err.Error()
@@ -36,19 +38,54 @@ func main() {
 		return
 	}
 
-	fmt.Println("You entered:", args)
+	filePath := args[0]
+	result := ""
 
-	// Process the input (example: reverse it)
-	input := args[0]
-	reversed_input := reverse(input)
+	if *linesCounterPtr || *wordsCounterPtr {
+		file, err := os.Open(filePath)
+		if err != nil {
+			fmt.Printf("lyswc: %s", err.Error())
+			return
+		}
+		defer file.Close()
 
-	fmt.Println(reversed_input)
-}
+		// Create a new Scanner
+		scanner := bufio.NewScanner(file)
+		lineCounter := 0
+		wordCounter := 0
+		for scanner.Scan() {
+			line := scanner.Text()
 
-func reverse(s string) string {
-	reversed_s := []rune(s)
-	for i, j := 0, len(reversed_s)-1; i < j; i, j = i+1, j-1 {
-		reversed_s[i], reversed_s[j] = reversed_s[j], reversed_s[i]
+			lineCounter++
+
+			words := strings.Fields(line)
+			wordCounter += len(words)
+		}
+
+		if *linesCounterPtr {
+			result += fmt.Sprintf("%8d ", lineCounter)
+		}
+
+		if *wordsCounterPtr {
+			result += fmt.Sprintf("%8d ", wordCounter)
+		}
+
 	}
-	return string(reversed_s)
+
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		fmt.Printf("lyswc: %s", err.Error())
+		return
+	}
+
+	fileName := fileInfo.Name()
+	if *bytesCounterPtr {
+		fileSize := fileInfo.Size()
+		// printed with a width of 8 characters. If fileSize has fewer than 8 characters, it will be right-aligned and padded with spaces on the left.
+
+		result += fmt.Sprintf("%8d ", fileSize)
+	}
+
+	result += fmt.Sprintf("%s \n", fileName)
+	fmt.Println(result)
 }
