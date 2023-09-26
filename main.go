@@ -4,10 +4,20 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"strings"
 )
+
+type ByteCounter struct {
+	count int64
+}
+
+func (bc *ByteCounter) Write(p []byte) (int, error) {
+	bc.count += int64(len(p))
+	return len(p), nil
+}
 
 func main() {
 
@@ -18,9 +28,13 @@ func main() {
 	bytesCounterPtr := mainFs.Bool("c", false, "The number of bytes in each input file is written to the standard output.")
 	linesCounterPtr := mainFs.Bool("l", false, "The number of lines in each input file is written to the standard output.")
 	wordsCounterPtr := mainFs.Bool("w", false, "The number of words in each input file is written to the standard output.")
+	charactersCounterPtr := mainFs.Bool(
+		"m",
+		false,
+		"The number of characters in each input file is written to the standard output. If the current locale does not support multibyte characters, this is equivalent to the -c option. This will cancel out any prior usage of the -c option.",
+	)
 	// Parse the command-line arguments with the custom FlagSet
 	err := mainFs.Parse(os.Args[1:])
-	// fmt.Println("tail:", mainFs.Args())
 
 	if err != nil {
 		errString := err.Error()
@@ -31,26 +45,43 @@ func main() {
 		return
 	}
 
-	args := mainFs.Args()
+	hasFlag := mainFs.NFlag() > 0
 
-	if len(args) < 1 {
-		fmt.Println("Usage: lyswc <filepath>")
-		return
+	if !hasFlag {
+		*bytesCounterPtr = true
+		*linesCounterPtr = true
+		*wordsCounterPtr = true
 	}
 
-	filePath := args[0]
-	result := ""
+	var reader io.Reader
 
-	if *linesCounterPtr || *wordsCounterPtr {
+	var filePath string
+
+	args := mainFs.Args()
+
+	inputInfo, _ := os.Stdin.Stat()
+	isInputFromStdin := inputInfo.Mode()&os.ModeCharDevice == 0
+	if isInputFromStdin {
+		reader = os.Stdin
+	} else {
+		if len(args) < 1 {
+			fmt.Println("Usage: lyswc <filepath>")
+			return
+		}
+		filePath = args[0]
 		file, err := os.Open(filePath)
 		if err != nil {
 			fmt.Printf("lyswc: %s", err.Error())
 			return
 		}
 		defer file.Close()
+		reader = file
+	}
 
-		// Create a new Scanner
-		scanner := bufio.NewScanner(file)
+	result := ""
+	// Create a new Scanner
+	scanner := bufio.NewScanner(reader)
+	if *linesCounterPtr || *wordsCounterPtr {
 		lineCounter := 0
 		wordCounter := 0
 		for scanner.Scan() {
@@ -60,6 +91,7 @@ func main() {
 
 			words := strings.Fields(line)
 			wordCounter += len(words)
+
 		}
 
 		if *linesCounterPtr {
@@ -69,23 +101,39 @@ func main() {
 		if *wordsCounterPtr {
 			result += fmt.Sprintf("%8d ", wordCounter)
 		}
-
 	}
 
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
-		fmt.Printf("lyswc: %s", err.Error())
-		return
+	// Reset Reader and read from the beginning
+	// reader.(*os.File) is actually assert that "reader" is type of "os.File"
+	if file, ok := reader.(*os.File); ok {
+		file.Seek(0, io.SeekStart)
+	} else {
+		fmt.Printf("lyswc: %s", "the input/file is not an `os.File`")
 	}
 
-	fileName := fileInfo.Name()
-	if *bytesCounterPtr {
-		fileSize := fileInfo.Size()
-		// printed with a width of 8 characters. If fileSize has fewer than 8 characters, it will be right-aligned and padded with spaces on the left.
-
-		result += fmt.Sprintf("%8d ", fileSize)
+	if *charactersCounterPtr {
+		// Mimicking wc -m
+		anotherScanner := bufio.NewScanner(reader)
+		anotherScanner.Split(bufio.ScanRunes)
+		runesCounter := 0
+		for anotherScanner.Scan() {
+			runesCounter++
+		}
+		result += fmt.Sprintf("%8d ", runesCounter)
+	} else if *bytesCounterPtr {
+		// Mimicking wc -c
+		var bc ByteCounter
+		byteCounter := &bc
+		_, err := io.Copy(byteCounter, reader)
+		if err != nil {
+			fmt.Println("HELLO")
+		}
+		result += fmt.Sprintf("%8d ", byteCounter.count)
 	}
 
-	result += fmt.Sprintf("%s \n", fileName)
-	fmt.Println(result)
+	if isInputFromStdin {
+		fmt.Println(result)
+	} else {
+		fmt.Println(result, filePath)
+	}
 }
