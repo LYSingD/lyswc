@@ -126,7 +126,7 @@ func main() {
 		byteCounter := &bc
 		_, err := io.Copy(byteCounter, reader)
 		if err != nil {
-			fmt.Println("HELLO")
+			fmt.Printf("lyswc: byteCounter error: %s", err.Error())
 		}
 		result += fmt.Sprintf("%8d ", byteCounter.count)
 	}
