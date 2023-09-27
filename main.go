@@ -57,12 +57,15 @@ func main() {
 
 	var filePath string
 
+	var buffer []byte
+
 	args := mainFs.Args()
 
 	inputInfo, _ := os.Stdin.Stat()
 	isInputFromStdin := inputInfo.Mode()&os.ModeCharDevice == 0
 	if isInputFromStdin {
-		reader = os.Stdin
+		buffer, _ = ioutil.ReadAll(os.Stdin)
+		reader = strings.NewReader(string(buffer))
 	} else {
 		if len(args) < 1 {
 			fmt.Println("Usage: lyswc <filepath>")
@@ -105,10 +108,11 @@ func main() {
 
 	// Reset Reader and read from the beginning
 	// reader.(*os.File) is actually assert that "reader" is type of "os.File"
-	if file, ok := reader.(*os.File); ok {
-		file.Seek(0, io.SeekStart)
+	if isInputFromStdin {
+		reader = strings.NewReader(string(buffer))
 	} else {
-		fmt.Printf("lyswc: %s", "the input/file is not an `os.File`")
+		file, _ := reader.(*os.File)
+		file.Seek(0, io.SeekStart)
 	}
 
 	if *charactersCounterPtr {
