@@ -28,3 +28,6 @@ $ lyswc test.txt
 # Read from standard input
 cat test.txt | lyswc
 ```
+
+#### Unit testing
+1. Run `go test`
