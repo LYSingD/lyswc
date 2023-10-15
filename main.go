@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -9,6 +10,13 @@ import (
 	"os"
 	"strings"
 )
+
+type CountResults struct {
+	bytesCount      int64
+	linesCount      int
+	wordsCount      int
+	charactersCount int
+}
 
 type ByteCounter struct {
 	count int64
@@ -20,124 +28,185 @@ func (bc *ByteCounter) Write(p []byte) (int, error) {
 }
 
 func main() {
-
 	// flag.*() returns a Pointer
-	mainFs := flag.NewFlagSet("mainFlagSet", flag.ContinueOnError)
-	mainFs.SetOutput(ioutil.Discard)
+	mainFlagSet := flag.NewFlagSet("mainFlagSet", flag.ContinueOnError)
 
-	bytesCounterPtr := mainFs.Bool("c", false, "The number of bytes in each input file is written to the standard output.")
-	linesCounterPtr := mainFs.Bool("l", false, "The number of lines in each input file is written to the standard output.")
-	wordsCounterPtr := mainFs.Bool("w", false, "The number of words in each input file is written to the standard output.")
-	charactersCounterPtr := mainFs.Bool(
+	// Prevent the default error messages as we're using our own custom error message.
+	mainFlagSet.SetOutput(ioutil.Discard)
+
+	bytesCounter, wordsCounter, linesCounter, charactersCounter := parseFlags(mainFlagSet)
+
+	args := mainFlagSet.Args()
+
+	data, filePath, isInputFromStdin := getInputSource(args)
+
+	resultsChan := make(chan CountResults)
+	go countAll(data, resultsChan)
+
+	countAllResult := <-resultsChan
+	display_output := ""
+
+	if *linesCounter {
+		display_output += fmt.Sprintf("%8d", countAllResult.linesCount)
+	}
+
+	if *wordsCounter {
+		display_output += fmt.Sprintf("%8d", countAllResult.wordsCount)
+	}
+
+	if *charactersCounter {
+		display_output += fmt.Sprintf("%8d", countAllResult.charactersCount)
+	} else if *bytesCounter {
+		display_output += fmt.Sprintf("%8d", countAllResult.bytesCount)
+	}
+
+	if isInputFromStdin {
+		fmt.Println(display_output)
+	} else {
+		fmt.Println(display_output, filePath)
+	}
+}
+
+func parseFlags(mainFlagSet *flag.FlagSet) (bytesCounter *bool, linesCounter *bool, wordsCounter *bool, charactersCounter *bool) {
+
+	bytesCounter = mainFlagSet.Bool("c", false, "The number of bytes in each input file is written to the standard output.")
+	linesCounter = mainFlagSet.Bool("l", false, "The number of lines in each input file is written to the standard output.")
+	wordsCounter = mainFlagSet.Bool("w", false, "The number of words in each input file is written to the standard output.")
+	charactersCounter = mainFlagSet.Bool(
 		"m",
 		false,
 		"The number of characters in each input file is written to the standard output. If the current locale does not support multibyte characters, this is equivalent to the -c option. This will cancel out any prior usage of the -c option.",
 	)
 	// Parse the command-line arguments with the custom FlagSet
-	err := mainFs.Parse(os.Args[1:])
+	err := mainFlagSet.Parse(os.Args[1:])
 
 	if err != nil {
 		errString := err.Error()
-		err_splitter := strings.Split(errString, " ")
-		invalid_option_index := len(err_splitter) - 1
-		invalid_option := err_splitter[invalid_option_index][1:]
-		fmt.Printf("lyswc: illegal option -- %s", invalid_option)
-		return
+		flagName := strings.TrimPrefix(errString, "flag provided but not defined: -")
+		fmt.Printf("lyswc: illegal option -- %s", flagName)
+		os.Exit(1)
 	}
 
-	hasFlag := mainFs.NFlag() > 0
+	hasFlag := mainFlagSet.NFlag() > 0
 
 	if !hasFlag {
-		*bytesCounterPtr = true
-		*linesCounterPtr = true
-		*wordsCounterPtr = true
+		*bytesCounter = true
+		*linesCounter = true
+		*wordsCounter = true
 	}
 
-	var reader io.Reader
+	return bytesCounter, linesCounter, wordsCounter, charactersCounter
+}
 
-	var filePath string
+func getInputSource(args []string) (data []byte, filePath string, isInputFromStdin bool) {
+	inputInfo, err := os.Stdin.Stat()
+	if err != nil {
+		fmt.Printf("lyswc: error: %s", err.Error())
+		os.Exit(1)
+	}
 
-	var buffer []byte
-
-	args := mainFs.Args()
-
-	inputInfo, _ := os.Stdin.Stat()
-	isInputFromStdin := inputInfo.Mode()&os.ModeCharDevice == 0
+	isInputFromStdin = inputInfo.Mode()&os.ModeCharDevice == 0
 	if isInputFromStdin {
-		buffer, _ = ioutil.ReadAll(os.Stdin)
-		reader = strings.NewReader(string(buffer))
+		stdinContents, err := ioutil.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Printf("lyswc: error: %s", err.Error())
+			os.Exit(1)
+		}
+		data = stdinContents
 	} else {
 		if len(args) < 1 {
 			fmt.Println("Usage: lyswc <filepath>")
-			return
+			os.Exit(1)
 		}
 		filePath = args[0]
-		file, err := os.Open(filePath)
+		data, err = ioutil.ReadFile(filePath)
 		if err != nil {
 			fmt.Printf("lyswc: %s", err.Error())
-			return
+			os.Exit(1)
 		}
-		defer file.Close()
-		reader = file
 	}
 
-	result := ""
+	return data, filePath, isInputFromStdin
+}
+
+func countAll(data []byte, resultsChan chan CountResults) {
+	var results CountResults
+
+	// Create channels to collect result from each count functions
+	bytesChan := make(chan int64)
+	wordsChan := make(chan int)
+	linesChan := make(chan int)
+	charactersChan := make(chan int)
+
+	// Launch goroutines
+	go func() {
+		bytesChan <- countBytes(bytes.NewReader(data))
+	}()
+	go func() {
+		wordsChan <- countWords(bytes.NewReader(data))
+	}()
+	go func() {
+		linesChan <- countLines(bytes.NewReader(data))
+	}()
+	go func() {
+		charactersChan <- countCharacters(bytes.NewReader(data))
+	}()
+
+	// Collect results from the channels
+	results.bytesCount = <-bytesChan
+	results.wordsCount = <-wordsChan
+	results.linesCount = <-linesChan
+	results.charactersCount = <-charactersChan
+
+	// Send the combined results back to the main goroutine
+	resultsChan <- results
+}
+
+func countLines(reader io.Reader) int {
 	// Create a new Scanner
 	scanner := bufio.NewScanner(reader)
-	if *linesCounterPtr || *wordsCounterPtr {
-		lineCounter := 0
-		wordCounter := 0
-		for scanner.Scan() {
-			line := scanner.Text()
-
-			lineCounter++
-
-			words := strings.Fields(line)
-			wordCounter += len(words)
-
-		}
-
-		if *linesCounterPtr {
-			result += fmt.Sprintf("%8d ", lineCounter)
-		}
-
-		if *wordsCounterPtr {
-			result += fmt.Sprintf("%8d ", wordCounter)
-		}
+	lineCounter := 0
+	for scanner.Scan() {
+		lineCounter++
 	}
 
-	// Reset Reader and read from the beginning
-	// reader.(*os.File) is actually assert that "reader" is type of "os.File"
-	if isInputFromStdin {
-		reader = strings.NewReader(string(buffer))
-	} else {
-		file, _ := reader.(*os.File)
-		file.Seek(0, io.SeekStart)
+	return lineCounter
+
+}
+
+func countWords(reader io.Reader) int {
+	// Create a new Scanner
+	scanner := bufio.NewScanner(reader)
+
+	wordCounter := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		words := strings.Fields(line)
+		wordCounter += len(words)
+
 	}
 
-	if *charactersCounterPtr {
-		// Mimicking wc -m
-		anotherScanner := bufio.NewScanner(reader)
-		anotherScanner.Split(bufio.ScanRunes)
-		runesCounter := 0
-		for anotherScanner.Scan() {
-			runesCounter++
-		}
-		result += fmt.Sprintf("%8d ", runesCounter)
-	} else if *bytesCounterPtr {
-		// Mimicking wc -c
-		var bc ByteCounter
-		byteCounter := &bc
-		_, err := io.Copy(byteCounter, reader)
-		if err != nil {
-			fmt.Printf("lyswc: byteCounter error: %s", err.Error())
-		}
-		result += fmt.Sprintf("%8d ", byteCounter.count)
-	}
+	return wordCounter
+}
 
-	if isInputFromStdin {
-		fmt.Println(result)
-	} else {
-		fmt.Println(result, filePath)
+func countCharacters(reader io.Reader) int {
+	// Mimicking wc -m
+	anotherScanner := bufio.NewScanner(reader)
+	anotherScanner.Split(bufio.ScanRunes)
+	runesCounter := 0
+	for anotherScanner.Scan() {
+		runesCounter++
 	}
+	return runesCounter
+}
+
+func countBytes(reader io.Reader) int64 {
+	var bc ByteCounter
+	byteCounter := &bc
+	_, err := io.Copy(byteCounter, reader)
+	if err != nil {
+		fmt.Printf("lyswc: byteCounter error: %s", err.Error())
+		os.Exit(1)
+	}
+	return byteCounter.count
 }
