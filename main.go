@@ -34,7 +34,7 @@ func main() {
 	// Prevent the default error messages as we're using our own custom error message.
 	mainFlagSet.SetOutput(ioutil.Discard)
 
-	bytesCounter, wordsCounter, linesCounter, charactersCounter := parseFlags(mainFlagSet)
+	bytesCounter, linesCounter, wordsCounter, charactersCounter := parseFlags(mainFlagSet)
 
 	args := mainFlagSet.Args()
 
@@ -169,7 +169,6 @@ func countLines(reader io.Reader) int {
 	for scanner.Scan() {
 		lineCounter++
 	}
-
 	return lineCounter
 
 }
